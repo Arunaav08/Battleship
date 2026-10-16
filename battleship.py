@@ -111,5 +111,62 @@ def ask_input(prompt, low, high):
 board = create_board()
 ships = []
 place_all_ships(board, ships)
-print(len(ships))
-display_board(board, hide_ships=False)
+print(f"length of ship: {len(ships)}")
+#display_board(board, hide_ships=False)
+
+
+def main():
+    my_board = create_board()
+    my_ships = []
+    ai_board = create_board()
+    ai_ships = []
+    place_all_ships(my_board, my_ships)    # your fleet
+    place_all_ships(ai_board, ai_ships)    # the AI's fleet
+    while True:
+        print("YOUR BOARD")
+        display_board(my_board, hide_ships=False)
+        print("ENEMY WATERS")
+        display_board(ai_board, hide_ships=True)
+
+        # My turn looping logic
+        print("PLAYER")
+        while True:
+            my_row = ask_input("row(1-10): ", 1, BOARD_SIZE)-1
+            my_col = ask_input("column(1-10): ", 1, BOARD_SIZE)-1
+            my_result = fire(ai_board, my_row, my_col, ai_ships)
+            if my_result["result"] != "already":
+                break
+            print("You already fired here.")
+        if my_result.get("win"):
+            print("YOU WON!")
+            break
+        if my_result["result"] == "miss":
+            print("YOU A MISS!")
+        if my_result["result"] == "hit":
+            print(f"YOU HIT THEIR {my_result["ship"]}")
+        if my_result["result"] == "sunk":
+            print(f"YOU SANK THEIR {my_result["ship"]}")
+            
+            
+        # opponent's turn looping logic       
+        while True:
+            ai_row = random.randint(0, BOARD_SIZE-1)
+            ai_col = random.randint(0, BOARD_SIZE-1)
+            ai_result = fire(my_board, ai_row, ai_col, my_ships)
+            if ai_result["result"] != "already":
+                break
+        if ai_result.get("win"):
+            print("OPPONENT WON!")
+            break
+        if ai_result["result"] == "miss":
+            print("OPPONENT MISSES!")
+        if ai_result["result"] == "hit":
+            print(f"OPPONENT HIT YOUR {ai_result["ship"]}")
+        if ai_result["result"] == "sunk":
+            print(f"OPPONENT SANK YOUR {ai_result["ship"]}")
+        
+        
+main()
+        
+        
+        
