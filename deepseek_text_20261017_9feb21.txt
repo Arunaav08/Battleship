@@ -1,0 +1,44 @@
+[BROWSER A]                          [SERVER]                            [BROWSER B]
+connect        ──────────────────►   assign sid_A
+                                     store sid_A
+click Find Game
+   emit("join_game") ────────────►   no open game → create game_1
+                                     games["game_1"] = Game()
+                                     game_1.add_player(sid_A)
+                                     sid_to_room[sid_A] = "game_1"
+                                     join_room("game_1")  for sid_A
+                                     emit("state", view, to=sid_A)
+                ◄─────────────────── "waiting for opponent"
+
+                                     connect        ◄──────────────  connect
+                                     assign sid_B
+click Find Game
+   emit("join_game") ────────────►   find open game_1
+                                     game_1.add_player(sid_B)
+                                     sid_to_room[sid_B] = "game_1"
+                                     join_room("game_1")  for sid_B
+                                     emit("state", viewA, to=sid_A)
+                                     emit("state", viewB, to=sid_B)
+                ◄─────── both see: "place your ships"
+                                                              ◄─────── both see
+
+click Randomize
+   emit("place_ships") ──────────►   game_1.place_ships_random(sid_A)
+                                     if all ready:
+                                         game_1.turn = sid_A    (set inside add_player)
+                                     emit("state", viewA, to=sid_A)
+                                     emit("state", viewB, to=sid_B)
+                ◄─────── "your turn"                    ◄─────── "wait"
+
+B clicks Randomize
+   emit("place_ships") ──────────►   game_1.place_ships_random(sid_B)
+                                     ...same emits...
+A: "your turn"      B: "opponent's turn"
+
+A fires at (3, 5)
+   emit("fire", {r, c}) ─────────►   game_1.fire(sid_A, 3, 5)
+                                     result = {"result": "miss"}
+                                     emit("shot_result", result, to="game_1")
+                                     emit("state", viewA, to=sid_A)
+                                     emit("state", viewB, to=sid_B)
+                ◄──── result + new state  ◄──── same
