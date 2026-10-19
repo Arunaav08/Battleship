@@ -175,30 +175,8 @@ class Game:
             "over":        self.over,
             "winner":      self.winner,
             "you_are":     player_id,
+            "opponent_here":  opponent is not None,
+            "you_ready":      me["ready"],
+            "opponent_ready": opponent["ready"] if opponent else False,
         }
 
-
-# ============================================================
-# Scripted smoke test — run this file directly to check logic
-# ============================================================
-if __name__ == "__main__":
-    game = Game()
-    game.add_player("p1")
-    game.add_player("p2")
-    game.place_ships_random("p1")
-    game.place_ships_random("p2")
-
-    # Peek at p1's real board so we know what we're shooting at
-    print("p1 real board:")
-    for row in game.players["p1"]["board"]:
-        print("  " + " ".join(row))
-
-    shots = [("p1", 0, 0), ("p2", 5, 5), ("p1", 3, 3), ("p2", 7, 1)]
-    for shooter, r, c in shots:
-        print(f"\n{shooter} fires at ({r}, {c})")
-        print("  result:", game.fire(shooter, r, c))
-        print("  p1 sees enemy row 0:", game.view_for("p1")["enemy_board"][0])
-        print("  p2 sees enemy row 0:", game.view_for("p2")["enemy_board"][0])
-
-    print("\nTrying to fire out of turn (should error):")
-    print(" ", game.fire("p1", 0, 0)) 

@@ -4,15 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Battleship — Naval Command Console</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚢</text></svg>" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css" />
+<link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
 
-<!-- ambient ocean backdrop -->
 <div class="ocean" aria-hidden="true">
   <div class="ocean__swell ocean__swell--1"></div>
   <div class="ocean__swell ocean__swell--2"></div>
@@ -20,47 +18,31 @@
   <div class="ocean__vignette"></div>
 </div>
 
-<!-- ═══════════ COMMAND BAR ═══════════ -->
 <header class="cmdbar">
   <div class="cmdbar__ident">
     <span class="cmdbar__anchor" aria-hidden="true">⚓</span>
     <div>
       <h1 class="cmdbar__title">BATTLE<span>SHIP</span></h1>
-      <p class="cmdbar__sub">TACTICAL COMMAND // SECTOR 7-G // NORTH ATLANTIC</p>
+      <p class="cmdbar__sub">TACTICAL COMMAND // ONLINE MATCH</p>
     </div>
-  </div>
-  <div class="cmdbar__status">
-    <div class="lamp-cluster">
-      <span><i class="lamp lamp--red" id="lampContact"></i>CONTACT</span>
-      <span><i class="lamp lamp--amber" id="lampAlert"></i>ALERT</span>
-      <span><i class="lamp lamp--green" id="lampReady"></i>READY</span>
-    </div>
-    <div class="clock" id="missionClock">00:00:00</div>
   </div>
 </header>
 
-<!-- ═══════════ TURN STRIP ═══════════ -->
-<div class="turnbar" id="turnbar" data-state="you">
-  <span class="turnbar__chevrons" aria-hidden="true">▶▶▶</span>
-  <span id="turnText" aria-live="polite">YOUR TURN — FIRE AT WILL</span>
-  <span class="turnbar__chevrons" aria-hidden="true">◀◀◀</span>
+<div class="turnbar" id="turnbar" data-state="enemy">
+  <span id="turnText" aria-live="polite">PRESS FIND GAME TO BEGIN</span>
 </div>
 
 <main class="deck">
 
-  <!-- ═══════════ YOUR FLEET ═══════════ -->
-  <section class="console panel-you" id="panelYou">
+  <section class="console panel-you">
     <header class="console__head">
       <h2 class="console__name">Your Fleet</h2>
-      <span class="console__tag" id="youStatus">5/5 VESSELS OPERATIONAL</span>
     </header>
     <div class="board-frame">
       <div class="board" id="boardYou"></div>
     </div>
-    <ul class="fleet" id="fleetYou"></ul>
   </section>
 
-  <!-- ═══════════ OPS COLUMN ═══════════ -->
   <aside class="ops">
     <section class="console ops__log">
       <header class="console__head">
@@ -72,450 +54,165 @@
       </ol>
     </section>
     <div class="ops__controls">
-      <button class="btn btn--primary" id="btnNew" type="button">New Battle</button>
-      <button class="btn" id="btnSound" type="button">Sound: On ♪</button>
+      <button class="btn btn--primary" id="btnFind" type="button">Find Game</button>
+      <button class="btn" id="btnPlace" type="button" disabled>Randomize Ships</button>
     </div>
-    <p class="ops__hint">Click a square in <b>ENEMY WATERS</b> to fire. Hover any square for its grid coordinates. The log tracks every salvo.</p>
+    <p class="ops__hint">Find a game, randomize your ships, then click a square in <b>ENEMY WATERS</b> to fire.</p>
   </aside>
 
-  <!-- ═══════════ ENEMY WATERS ═══════════ -->
   <section class="console console--enemy" id="panelEnemy">
     <header class="console__head">
       <h2 class="console__name">Enemy Waters</h2>
-      <span class="console__tag" id="enemyStatus">FLEET DETECTED — 5 AFLOAT</span>
     </header>
     <div class="board-frame">
-      <div class="sweep" aria-hidden="true"></div>
-      <div class="board board--enemy" id="boardEnemy"></div>
+      <div class="board board--enemy board--locked" id="boardEnemy"></div>
     </div>
-    <div class="coord-readout" id="readEnemy">SCANNING…</div>
-    <ul class="fleet" id="fleetEnemy"></ul>
   </section>
 
 </main>
 
-<footer class="pagefoot">
-  GRID 10×10 · CARRIER 5 · BATTLESHIP 4 · CRUISER 3 · SUBMARINE 3 · DESTROYER 2 · UI FOR <span>game.py</span>
-</footer>
-
-<!-- ═══════════ END OF BATTLE ═══════════ -->
 <div class="endgame" id="endgame" hidden>
   <div class="endgame__card">
     <h2 class="endgame__stamp" id="endTitle">VICTORY</h2>
     <p class="endgame__detail" id="endDetail"></p>
-    <button class="btn btn--primary" id="btnAgain" type="button">Re-engage</button>
+    <button class="btn btn--primary" id="btnAgain" type="button">Play Again</button>
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 <script>
 (() => {
 "use strict";
 
-/* ─── NETWORK HOOK ────────────────────────────────────────────────
-   This page runs a local match vs. a CPU so every visual state can
-   be seen without a server. To drive it from game.py instead:
-     1. In playerFire(): replace the local fireOnBoard() call with a
-        fetch() POST to your server.
-     2. Feed the returned view_for() JSON straight into render().
-        The renderer only needs: your_board, enemy_board (grids of
-        '~' 'S' 'X' 'O'), your_turn, over, winner — exactly what
-        Game.view_for() already returns.
-────────────────────────────────────────────────────────────────── */
+/* Connect to the Flask-SocketIO server that served this page. */
+const socket = io();
 
-const SIZE  = 10;
-const SHIPS = { Carrier:5, Battleship:4, Cruiser:3, Submarine:3, Destroyer:2 };
+const SIZE = 10;
 const WATER = "~", SHIP = "S", HIT = "X", MISS = "O";
-const ROWS  = "ABCDEFGHIJ".split("");
-
+const ROWS = "ABCDEFGHIJ".split("");
 const $ = id => document.getElementById(id);
-const boardYouEl = $("boardYou"),   boardEnemyEl = $("boardEnemy");
-const fleetYouEl = $("fleetYou"),   fleetEnemyEl = $("fleetEnemy");
+
+const boardYouEl = $("boardYou"), boardEnemyEl = $("boardEnemy");
 const logEl = $("log"), cursorLi = $("logCursor");
 const turnbarEl = $("turnbar"), turnTextEl = $("turnText");
-const readEnemyEl = $("readEnemy"), clockEl = $("missionClock");
-const endgameEl = $("endgame"), endTitleEl = $("endTitle"), endDetailEl = $("endDetail");
-const youStatusEl = $("youStatus"), enemyStatusEl = $("enemyStatus");
-const panelEnemyEl = $("panelEnemy");
-const lampContact = $("lampContact"), lampAlert = $("lampAlert"), lampReady = $("lampReady");
+const endgameEl = $("endgame");
+const btnFind = $("btnFind"), btnPlace = $("btnPlace");
 
-/* ══════════ MODEL — direct port of game.py helpers ══════════ */
-const createBoard = () => Array.from({ length: SIZE }, () => Array(SIZE).fill(WATER));
+let last = null;   /* the most recent "state" message from the server */
 
-function canPlace(b, r, c, len, h) {
-  if (h && c + len > SIZE) return false;
-  if (!h && r + len > SIZE) return false;
-  for (let i = 0; i < len; i++)
-    if (b[h ? r : r + i][h ? c + i : c] !== WATER) return false;
-  return true;
-}
-
-function placeShipRandom(board, ships, name) {
-  const len = SHIPS[name];
-  for (;;) {
-    const r = Math.floor(Math.random() * SIZE);
-    const c = Math.floor(Math.random() * SIZE);
-    const h = Math.random() < 0.5;
-    if (!canPlace(board, r, c, len, h)) continue;
-    const cells = [];
-    for (let i = 0; i < len; i++) {
-      const rr = h ? r : r + i, cc = h ? c + i : c;
-      board[rr][cc] = SHIP;
-      cells.push([rr, cc]);
-    }
-    ships.push({ name, cells, hits: 0 });
-    return;
-  }
-}
-const placeAll = (board, ships) => { for (const n in SHIPS) placeShipRandom(board, ships, n); };
-
-function fireOnBoard(board, ships, r, c) {
-  const cell = board[r][c];
-  if (cell === HIT || cell === MISS) return { result: "already" };
-  if (cell === WATER) { board[r][c] = MISS; return { result: "miss" }; }
-  board[r][c] = HIT;
-  for (const s of ships) {
-    if (s.cells.some(([rr, cc]) => rr === r && cc === c)) {
-      s.hits++;
-      if (s.hits === s.cells.length) {
-        const win = ships.every(x => x.hits === x.cells.length);
-        return { result: "sunk", ship: s.name, win };
-      }
-      return { result: "hit", ship: s.name };
-    }
-  }
-}
-const hideShips = b => b.map(row => row.map(c => c === SHIP ? WATER : c));
-const coordName = (r, c) => ROWS[r] + "-" + (c + 1);
-
-/* ══════════ STATE ══════════ */
-let you, foe, turn, over, winner;
-let playerShots = 0, playerHits = 0;
-let cpuTargets = [], cpuShots = new Set();
-const sunkYouCells = new Set(), sunkEnemyCells = new Set();
-const EMPTY = new Set();
-let t0 = Date.now(), clockTimer = null;
-let soundOn = true, actx = null;
-let cellsYou = [], cellsEnemy = [];
-let fleetYouRefs = {}, fleetEnemyRefs = {};
-
-/* ══════════ BOARD DOM ══════════ */
+/* ── board DOM ── */
 function buildBoard(container, clickable) {
   container.innerHTML = "";
-  const frag = document.createDocumentFragment();
   const corner = document.createElement("div");
   corner.className = "coord";
-  frag.appendChild(corner);
+  container.appendChild(corner);
   for (let c = 0; c < SIZE; c++) {
     const d = document.createElement("div");
     d.className = "coord"; d.textContent = c + 1;
-    frag.appendChild(d);
+    container.appendChild(d);
   }
   const grid = [];
   for (let r = 0; r < SIZE; r++) {
     const lbl = document.createElement("div");
     lbl.className = "coord"; lbl.textContent = ROWS[r];
-    frag.appendChild(lbl);
+    container.appendChild(lbl);
     grid[r] = [];
     for (let c = 0; c < SIZE; c++) {
-      let el;
+      const el = document.createElement(clickable ? "button" : "div");
       if (clickable) {
-        el = document.createElement("button");
         el.type = "button";
-        el.addEventListener("click", () => playerFire(r, c));
-      } else {
-        el = document.createElement("div");
+        el.addEventListener("click", () => socket.emit("fire", { r: r, c: c }));
       }
       el.className = "cell";
-      el.dataset.r = r; el.dataset.c = c;
-      el.setAttribute("aria-label", "Grid " + coordName(r, c));
+      el.setAttribute("aria-label", "Grid " + ROWS[r] + "-" + (c + 1));
       grid[r][c] = el;
-      frag.appendChild(el);
+      container.appendChild(el);
     }
   }
-  container.appendChild(frag);
   return grid;
 }
 
-/* ══════════ FLEET STATUS CARDS ══════════ */
-function buildFleet(ul, ships) {
-  ul.innerHTML = "";
-  const refs = {};
-  ships.forEach(s => {
-    const li = document.createElement("li");
-    li.className = "ship";
-    li.innerHTML = '<span class="ship__name">' + s.name.toUpperCase() +
-                   '</span><span class="ship__pips"></span>';
-    const pipsEl = li.querySelector(".ship__pips"), pips = [];
-    for (let i = 0; i < s.cells.length; i++) {
-      const p = document.createElement("i");
-      p.className = "pip";
-      pipsEl.appendChild(p); pips.push(p);
-    }
-    ul.appendChild(li);
-    refs[s.name] = { li, pips, hitMarked: 0, sunk: false };
-  });
-  return refs;
-}
+const cellsYou = buildBoard(boardYouEl, false);
+const cellsEnemy = buildBoard(boardEnemyEl, true);
 
-function updateFleet(refs, ships) {
-  ships.forEach(s => {
-    const ref = refs[s.name];
-    for (let i = ref.hitMarked; i < s.hits; i++) ref.pips[i].classList.add("pip--hit");
-    ref.hitMarked = Math.max(ref.hitMarked, s.hits);
-    if (s.hits === s.cells.length && !ref.sunk) {
-      ref.sunk = true;
-      ref.li.classList.add("ship--sunk");
-    }
-  });
-}
-
-/* ══════════ RENDER — consumes view_for() shape ══════════ */
-function paint(grid, view, o) {
+function paint(grid, board) {
   for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
-    const v = view[r][c], k = r + "," + c;
+    const v = board[r][c];
     let cls = "cell";
-    if (v === SHIP)      cls += o.deadSet.has(k) ? " cell--dead" : (o.ghosts ? " cell--reveal" : " cell--ship");
-    else if (v === HIT)  cls += o.sunkSet.has(k) ? " cell--sunk" : " cell--hit";
+    if (v === SHIP) cls += " cell--ship";
+    else if (v === HIT) cls += " cell--hit";
     else if (v === MISS) cls += " cell--miss";
-    if (o.recent && o.recent.r === r && o.recent.c === c) cls += " cell--recent";
     grid[r][c].className = cls;
   }
 }
 
-function render(recent) {
-  paint(cellsYou, you.board, {
-    recent: recent && recent.side === "you" ? recent : null,
-    deadSet: sunkYouCells, sunkSet: EMPTY, ghosts: false
-  });
-  const defeat = over && winner === "foe";
-  paint(cellsEnemy, defeat ? foe.board : hideShips(foe.board), {
-    recent: recent && recent.side === "enemy" ? recent : null,
-    sunkSet: sunkEnemyCells, deadSet: EMPTY, ghosts: defeat
-  });
+/* ── what should the turn bar say? ── */
+function statusOf(v) {
+  if (v.over) {
+    return v.winner === v.you_are
+      ? ["win", "VICTORY — ENEMY FLEET DESTROYED"]
+      : ["lose", "DEFEAT — YOUR FLEET IS LOST"];
+  }
+  if (!v.opponent_here)  return ["enemy", "WAITING FOR AN OPPONENT…"];
+  if (!v.you_ready)      return ["enemy", "PLACE YOUR SHIPS"];
+  if (!v.opponent_ready) return ["enemy", "WAITING FOR OPPONENT TO PLACE SHIPS…"];
+  return v.your_turn ? ["you", "YOUR TURN — FIRE AT WILL"]
+                     : ["enemy", "OPPONENT IS TAKING AIM…"];
 }
 
-/* ══════════ TURN / STATUS UI ══════════ */
-const alive = ships => ships.filter(s => s.hits < s.cells.length).length;
+function render(v) {
+  paint(cellsYou, v.your_board);
+  paint(cellsEnemy, v.enemy_board);
 
-function updateStatusTags() {
-  youStatusEl.textContent   = alive(you.ships) + "/5 VESSELS OPERATIONAL";
-  enemyStatusEl.textContent = alive(foe.ships) + " AFLOAT — SEARCHING";
+  const [state, text] = statusOf(v);
+  turnbarEl.dataset.state = state;
+  turnTextEl.textContent = text;
+
+  const canFire = state === "you";
+  boardEnemyEl.classList.toggle("board--locked", !canFire);
+  btnPlace.disabled = !(v.opponent_here && !v.you_ready);
+
+  if (v.over) {
+    const win = v.winner === v.you_are;
+    endgameEl.classList.toggle("endgame--win", win);
+    endgameEl.classList.toggle("endgame--lose", !win);
+    $("endTitle").textContent = win ? "VICTORY" : "DEFEAT";
+    $("endDetail").textContent = text;
+    endgameEl.hidden = false;
+  }
 }
 
-function syncTurnUI() {
-  const yourTurn = turn === "you" && !over;
-  boardEnemyEl.classList.toggle("board--locked", !yourTurn);
-  panelEnemyEl.classList.toggle("is-targetable", yourTurn);
-  turnbarEl.dataset.state = over ? (winner === "you" ? "win" : "lose")
-                                 : (yourTurn ? "you" : "enemy");
-  turnTextEl.textContent = over
-    ? (winner === "you" ? "ENEMY FLEET DESTROYED — SECTOR SECURED"
-                        : "YOUR FLEET IS LOST — SIGNAL LOST")
-    : (yourTurn ? "YOUR TURN — FIRE AT WILL"
-                : "INCOMING — ENEMY GUNNERS TAKING AIM");
-  lampReady.classList.toggle("on", yourTurn);
-  lampAlert.classList.toggle("on", !over && !yourTurn);
-}
-
-/* ══════════ CLOCK + LOG ══════════ */
-function elapsed() { return Math.floor((Date.now() - t0) / 1000); }
-function clockStr() {
-  const s = elapsed();
-  return [s / 3600, s / 60 % 60, s % 60].map(v => String(Math.floor(v)).padStart(2, "0")).join(":");
-}
-function logTime() {
-  const s = elapsed();
-  return String(Math.floor(s / 60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0");
-}
-function startClock() {
-  clearInterval(clockTimer);
-  clockEl.textContent = clockStr();
-  clockTimer = setInterval(() => clockEl.textContent = clockStr(), 1000);
-}
-function log(html, kind) {
+/* ── combat log ── */
+function addLog(html, kind) {
   const li = document.createElement("li");
   li.className = "log__line log--" + kind;
-  li.innerHTML = '<span class="log__t">' + logTime() + "</span>" + html;
+  li.innerHTML = html;
   logEl.insertBefore(li, cursorLi);
   while (logEl.children.length > 60) logEl.firstElementChild.remove();
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-/* ══════════ SOUND (WebAudio, gesture-safe) ══════════ */
-function ac() {
-  if (!soundOn) return null;
-  try {
-    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
-    if (actx.state === "suspended") actx.resume();
-    return actx;
-  } catch (e) { return null; }
-}
-function tone(freq, dur, type, vol, delay, slideTo) {
-  const a = ac(); if (!a) return;
-  const t = a.currentTime + (delay || 0);
-  const o = a.createOscillator(), g = a.createGain();
-  o.type = type || "sine";
-  o.frequency.setValueAtTime(freq, t);
-  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
-  g.gain.setValueAtTime(vol || .12, t);
-  g.gain.exponentialRampToValueAtTime(.0001, t + dur);
-  o.connect(g).connect(a.destination);
-  o.start(t); o.stop(t + dur + .05);
-}
-function noise(dur, vol) {
-  const a = ac(); if (!a) return;
-  const buf = a.createBuffer(1, a.sampleRate * dur, a.sampleRate);
-  const d = buf.getChannelData(0);
-  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
-  const n = a.createBufferSource(); n.buffer = buf;
-  const f = a.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 900;
-  const g = a.createGain(); g.gain.value = vol || .25;
-  n.connect(f).connect(g).connect(a.destination); n.start();
-}
-function sfx(kind) {
-  switch (kind) {
-    case "miss":  tone(420, .18, "sine", .07, 0, 180); break;
-    case "hit":   noise(.35, .3); tone(160, .3, "sawtooth", .12, 0, 50); break;
-    case "sunk":  noise(.5, .35); tone(220, .5, "square", .1, 0, 40); tone(110, .6, "sine", .12, .1, 35); break;
-    case "deny":  tone(140, .09, "square", .06); break;
-    case "win":   [523, 659, 784, 1046].forEach((f, i) => tone(f, .22, "triangle", .1, i * .13)); break;
-    case "lose":  [330, 262, 196, 131].forEach((f, i) => tone(f, .3, "triangle", .1, i * .18)); break;
-  }
-}
+/* ── messages from the server ── */
+socket.on("state", v => { last = v; render(v); });
 
-/* ══════════ COMBAT ══════════ */
-function handleResult(shooter, r, c, res) {
-  if (shooter === "you") { playerShots++; if (res.result !== "miss") playerHits++; }
-  const at = coordName(r, c), who = shooter === "you" ? "YOU" : "ENEMY";
-
-  if (res.result === "miss") {
-    log(who + " FIRE ▸ " + at + " — splash only. No contact.", "miss");
-    sfx("miss");
-  } else if (res.result === "hit") {
-    log(who + " FIRE ▸ " + at + " — <b>DIRECT HIT</b> on " + res.ship.toUpperCase() + ".", "hit");
-    sfx("hit");
-    if (shooter === "foe") lampContact.classList.add("on");
-  } else if (res.result === "sunk") {
-    const ownerObj = shooter === "you" ? foe : you;
-    const sink = shooter === "you" ? sunkEnemyCells : sunkYouCells;
-    const ship = ownerObj.ships.find(s => s.name === res.ship);
-    ship.cells.forEach(([rr, cc]) => sink.add(rr + "," + cc));
-    if (shooter === "foe") lampContact.classList.add("on");
-    log(who + " FIRE ▸ " + at + " — " + res.ship.toUpperCase() + " <b>DESTROYED</b>.", "sunk");
-    sfx("sunk");
-  }
-
-  updateFleet(fleetYouRefs, you.ships);
-  updateFleet(fleetEnemyRefs, foe.ships);
-  updateStatusTags();
-  render({ r, c, side: shooter === "you" ? "enemy" : "you" });
-
-  if (res.win) { endGame(shooter); return; }
-  turn = shooter === "you" ? "foe" : "you";
-  syncTurnUI();
-  if (turn === "foe") setTimeout(cpuFireOnce, 900 + Math.random() * 700);
-}
-
-function playerFire(r, c) {
-  if (over || turn !== "you") return;
-  const res = fireOnBoard(foe.board, foe.ships, r, c);
-  if (res.result === "already") {
-    const el = cellsEnemy[r][c];
-    el.classList.remove("cell--deny"); void el.offsetWidth; el.classList.add("cell--deny");
-    sfx("deny");
-    return;
-  }
-  handleResult("you", r, c, res);   /* ← replace with fetch() for server play */
-}
-
-/* CPU opponent: hunt on parity, chase adjacent squares after a hit */
-function pickCpuShot() {
-  while (cpuTargets.length) {
-    const s = cpuTargets.pop();
-    if (!cpuShots.has(s.r + "," + s.c)) return s;
-  }
-  const options = [];
-  for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++)
-    if (!cpuShots.has(r + "," + c)) options.push({ r, c });
-  const parity = options.filter(o => (o.r + o.c) % 2 === 0);
-  const pool = parity.length ? parity : options;
-  return pool[Math.floor(Math.random() * pool.length)];
-}
-function cpuFireOnce() {
-  if (over || turn !== "foe") return;
-  const shot = pickCpuShot();
-  cpuShots.add(shot.r + "," + shot.c);
-  const res = fireOnBoard(you.board, you.ships, shot.r, shot.c);
-  if (res.result === "hit") {
-    [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dr, dc]) => {
-      const r = shot.r + dr, c = shot.c + dc;
-      if (r >= 0 && r < SIZE && c >= 0 && c < SIZE) cpuTargets.push({ r, c });
-    });
-  } else if (res.result === "sunk") {
-    cpuTargets.length = 0;
-  }
-  handleResult("foe", shot.r, shot.c, res);
-}
-
-function endGame(winnerSide) {
-  over = true; winner = winnerSide;
-  clearInterval(clockTimer);
-  syncTurnUI();
-  render(null);
-  const win = winnerSide === "you";
-  sfx(win ? "win" : "lose");
-  log(win ? "Enemy fleet annihilated. Sector secured."
-          : "All hands lost. The enemy controls the sector.", "info");
-  endgameEl.classList.toggle("endgame--win", win);
-  endgameEl.classList.toggle("endgame--lose", !win);
-  endTitleEl.textContent = win ? "VICTORY" : "DEFEAT";
-  const acc = playerShots ? Math.round(playerHits / playerShots * 100) : 0;
-  endDetailEl.textContent = playerShots + " SHOTS FIRED · " + acc + "% ACCURACY · MISSION TIME " + clockStr();
-  endgameEl.hidden = false;
-}
-
-/* ══════════ SETUP ══════════ */
-function newBattle() {
-  you = { board: createBoard(), ships: [] };
-  foe = { board: createBoard(), ships: [] };
-  placeAll(you.board, you.ships);
-  placeAll(foe.board, foe.ships);
-  turn = "you"; over = false; winner = null;
-  playerShots = 0; playerHits = 0;
-  cpuTargets = []; cpuShots = new Set();
-  sunkYouCells.clear(); sunkEnemyCells.clear();
-  lampContact.classList.remove("on");
-  fleetYouRefs  = buildFleet(fleetYouEl, you.ships);
-  fleetEnemyRefs = buildFleet(fleetEnemyEl, foe.ships);
-  endgameEl.hidden = true;
-  t0 = Date.now(); startClock();
-  logEl.querySelectorAll(".log__line").forEach(n => n.remove());
-  log("⚓ Battle stations — both fleets deployed. 5 vessels in position.", "info");
-  log("You have first salvo. Fire when ready, Commander.", "info");
-  readEnemyEl.textContent = "SCANNING…";
-  updateStatusTags();
-  render(null);
-  syncTurnUI();
-}
-
-/* hover coordinate readout on the enemy board */
-boardEnemyEl.addEventListener("pointerover", e => {
-  const cell = e.target.closest(".cell");
-  if (cell) readEnemyEl.textContent = "TARGET ▸ " + coordName(+cell.dataset.r, +cell.dataset.c);
-});
-boardEnemyEl.addEventListener("pointerleave", () => readEnemyEl.textContent = "SCANNING…");
-
-$("btnNew").addEventListener("click", newBattle);
-$("btnAgain").addEventListener("click", newBattle);
-$("btnSound").addEventListener("click", e => {
-  soundOn = !soundOn;
-  e.currentTarget.textContent = soundOn ? "Sound: On ♪" : "Sound: Off ∅";
-  if (soundOn) tone(660, .1, "triangle", .08);
+socket.on("shot_result", res => {
+  /* The shooter is whoever had the turn before this shot. */
+  const who = last && last.your_turn ? "YOU" : "ENEMY";
+  if (res.result === "miss") addLog(who + " FIRE — splash only.", "miss");
+  else if (res.result === "hit") addLog(who + " FIRE — <b>DIRECT HIT</b> on " + res.ship.toUpperCase() + ".", "hit");
+  else if (res.result === "sunk") addLog(who + " FIRE — " + res.ship.toUpperCase() + " <b>DESTROYED</b>.", "sunk");
 });
 
-cellsYou   = buildBoard(boardYouEl, false);
-cellsEnemy = buildBoard(boardEnemyEl, true);
-newBattle();
+socket.on("error_msg", res => addLog(res.error, "info"));
+
+/* ── buttons ── */
+btnFind.addEventListener("click", () => {
+  socket.emit("join_game");
+  btnFind.disabled = true;      /* one join per page load */
+  addLog("Searching for a game…", "info");
+});
+btnPlace.addEventListener("click", () => socket.emit("place_ships"));
+$("btnAgain").addEventListener("click", () => location.reload());
 })();
 </script>
 </body>
