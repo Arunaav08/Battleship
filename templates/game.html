@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Battleship — Naval Command Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<div class="ocean" aria-hidden="true">
+  <div class="ocean__swell ocean__swell--1"></div>
+  <div class="ocean__swell ocean__swell--2"></div>
+  <div class="ocean__grid"></div>
+  <div class="ocean__vignette"></div>
+</div>
+
+<header class="cmdbar">
+  <div class="cmdbar__ident">
+    <span class="cmdbar__anchor" aria-hidden="true">⚓</span>
+    <div>
+      <h1 class="cmdbar__title">BATTLE<span>SHIP</span></h1>
+      <p class="cmdbar__sub">TACTICAL COMMAND // ONLINE MATCH</p>
+    </div>
+  </div>
+</header>
+
+<div class="turnbar" id="turnbar" data-state="enemy">
+  <span id="turnText" aria-live="polite">CONNECTING TO BATTLE...</span>
+</div>
+
+<div class="toolbar">
+  <button class="btn btn--primary" id="btnPlace" type="button" disabled>Randomize Ships</button>
+  <button class="btn" id="btnLeave" type="button">Return to Base</button>
+  <button class="btn btn--voice" id="btnVoice" type="button" data-voice="off">VOICE: OFF</button>
+  <button class="btn" id="btnMute" type="button" disabled>MIC LIVE</button>
+</div>
+
+<main class="deck">
+  <section class="console panel-you">
+    <header class="console__head">
+      <h2 class="console__name">Your Fleet</h2>
+    </header>
+    <div class="board-frame">
+      <div class="board" id="boardYou"></div>
+    </div>
+  </section>
+
+  <aside class="ops">
+    <section class="console ops__log">
+      <header class="console__head">
+        <h2 class="console__name">Combat Log</h2>
+        <span class="console__tag console__tag--live">LIVE FEED</span>
+      </header>
+      <ol class="log" id="log" aria-live="polite">
+        <li class="log__cursor" id="logCursor">▮</li>
+      </ol>
+    </section>
+
+    <section class="console ops__chat">
+      <header class="console__head">
+        <h2 class="console__name">Comms</h2>
+        <span class="console__tag console__tag--live">CHANNEL OPEN</span>
+      </header>
+      <ol class="chat" id="chat" aria-live="polite"></ol>
+      <form class="chat__form" id="chatForm">
+        <input class="chat__input" id="chatInput" type="text" maxlength="200"
+               placeholder="Message opponent…" autocomplete="off" />
+        <button class="chat__send" type="submit" aria-label="Send message">▶</button>
+      </form>
+    </section>
+
+    <p class="ops__hint">Click a square in <b>ENEMY WATERS</b> to fire. Voice &amp; comms stay live until you leave.</p>
+  </aside>
+
+  <section class="console console--enemy" id="panelEnemy">
+    <header class="console__head">
+      <h2 class="console__name">Enemy Waters</h2>
+    </header>
+    <div class="board-frame">
+      <div class="board board--enemy board--locked" id="boardEnemy"></div>
+    </div>
+  </section>
+</main>
+
+<div class="endgame" id="endgame" hidden>
+  <div class="endgame__card">
+    <h2 class="endgame__stamp" id="endTitle">VICTORY</h2>
+    <p class="endgame__detail" id="endDetail"></p>
+    <button class="btn btn--primary" id="btnEndLeave" type="button">Return to Base</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+(() => {
+"use strict";
+
+const socket = io();
+const token  = new URLSearchParams(window.location.search).get("token");
+if (!token) window.location.href = "/";
+
+const SIZE = 10;
+const WATER = "~", SHIP = "S", HIT = "X", MISS = "O";
+const ROWS = "ABCDEFGHIJ".split("");
+const $ = id => document.getElementById(id);
+
+const boardYouEl = $("boardYou"), boardEnemyEl = $("boardEnemy");
+const logEl = $("log"), cursorLi = $("logCursor");
+const turnbarEl = $("turnbar"), turnTextEl = $("turnText");
+const endgameEl = $("endgame");
+const btnPlace = $("btnPlace"), btnLeave = $("btnLeave");
+
+let last = null;
+
+function buildBoard(container, clickable) {
+  container.innerHTML = "";
+  const corner = document.createElement("div");
+  corner.className = "coord";
+  container.appendChild(corner);
+  for (let c = 0; c < SIZE; c++) {
+    const d = document.createElement("div");
+    d.className = "coord"; d.textContent = c + 1;
+    container.appendChild(d);
+  }
+  const grid = [];
+  for (let r = 0; r < SIZE; r++) {
+    const lbl = document.createElement("div");
+    lbl.className = "coord"; lbl.textContent = ROWS[r];
+    container.appendChild(lbl);
+    grid[r] = [];
+    for (let c = 0; c < SIZE; c++) {
+      const el = document.createElement(clickable ? "button" : "div");
+      if (clickable) {
+        el.type = "button";
+        el.addEventListener("click", () => socket.emit("fire", { r: r, c: c }));
+      }
+      el.className = "cell";
+      el.setAttribute("aria-label", "Grid " + ROWS[r] + "-" + (c + 1));
+      grid[r][c] = el;
+      container.appendChild(el);
+    }
+  }
+  return grid;
+}
+
+const cellsYou   = buildBoard(boardYouEl, false);
+const cellsEnemy = buildBoard(boardEnemyEl, true);
+
+function paint(grid, board) {
+  for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
+    const v = board[r][c];
+    let cls = "cell";
+    if (v === SHIP) cls += " cell--ship";
+    else if (v === HIT) cls += " cell--hit";
+    else if (v === MISS) cls += " cell--miss";
+    grid[r][c].className = cls;
+  }
+}
+
+function statusOf(v) {
+  if (v.over) {
+    return v.winner === v.you_are
+      ? ["win", "VICTORY — ENEMY FLEET DESTROYED"]
+      : ["lose", "DEFEAT — YOUR FLEET IS LOST"];
+  }
+  if (!v.opponent_here)  return ["enemy", "WAITING FOR AN OPPONENT…"];
+  if (!v.you_ready)      return ["enemy", "PLACE YOUR SHIPS"];
+  if (!v.opponent_ready) return ["enemy", "WAITING FOR OPPONENT TO PLACE SHIPS…"];
+  return v.your_turn ? ["you", "YOUR TURN — FIRE AT WILL"]
+                     : ["enemy", "OPPONENT IS TAKING AIM…"];
+}
+
+function render(v) {
+  paint(cellsYou, v.your_board);
+  paint(cellsEnemy, v.enemy_board);
+
+  const [state, text] = statusOf(v);
+  turnbarEl.dataset.state = state;
+  turnTextEl.textContent  = text;
+
+  const canFire = state === "you";
+  boardEnemyEl.classList.toggle("board--locked", !canFire);
+  btnPlace.disabled = !(v.opponent_here && !v.you_ready);
+
+  if (v.over) {
+    const win = v.winner === v.you_are;
+    endgameEl.classList.toggle("endgame--win", win);
+    endgameEl.classList.toggle("endgame--lose", !win);
+    $("endTitle").textContent  = win ? "VICTORY" : "DEFEAT";
+    $("endDetail").textContent = text;
+    endgameEl.hidden = false;
+  }
+}
+
+function addLog(html, kind) {
+  const li = document.createElement("li");
+  li.className = "log__line log--" + kind;
+  li.innerHTML = html;
+  logEl.insertBefore(li, cursorLi);
+  while (logEl.children.length > 60) logEl.firstElementChild.remove();
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+/* ── LEAVING: tell the server, then go to the lobby ── */
+let leaving = false;
+function returnToBase() {
+  if (leaving) return;
+  leaving = true;
+  btnLeave.disabled = true;
+  socket.emit("leave_game");
+  setTimeout(() => { window.location.href = "/"; }, 150);
+}
+btnLeave.addEventListener("click", returnToBase);
+$("btnEndLeave").addEventListener("click", returnToBase);
+
+/* ── OPPONENT LEFT: show who it was ── */
+socket.on("opponent_left", data => {
+  const name = (data.username || "THE OPPONENT").toUpperCase();
+  addLog("<b>" + name + "</b> HAS LEFT THE BATTLE.", "info");
+  boardEnemyEl.classList.add("board--locked");
+  btnPlace.disabled = true;
+  turnbarEl.dataset.state = "enemy";
+  turnTextEl.textContent  = "BATTLE ABORTED — OPPONENT LEFT";
+  endgameEl.classList.remove("endgame--win", "endgame--lose");
+  endgameEl.classList.add("endgame--abandoned");
+  $("endTitle").textContent  = "OPPONENT LEFT";
+  $("endDetail").textContent = name + " has retreated from the sector.";
+  endgameEl.hidden = false;
+});
+
+/* ── server messages ── */
+socket.on("connect", () => socket.emit("authenticate", { token: token }));
+socket.on("auth_failed", () => { window.location.href = "/"; });
+socket.on("state", v => { last = v; render(v); });
+
+socket.on("shot_result", res => {
+  const who = last && last.your_turn ? "YOU" : "ENEMY";
+  if (res.result === "miss") addLog(who + " FIRE — splash only.", "miss");
+  else if (res.result === "hit") addLog(who + " FIRE — <b>DIRECT HIT</b> on " + res.ship.toUpperCase() + ".", "hit");
+  else if (res.result === "sunk") addLog(who + " FIRE — " + res.ship.toUpperCase() + " <b>DESTROYED</b>.", "sunk");
+});
+
+socket.on("error_msg", res => addLog(res.error, "info"));
+
+btnPlace.addEventListener("click", () => socket.emit("place_ships"));
+
+/* ══════════ VOICE CHAT — WebRTC P2P, signaled over Socket.IO ══════════ */
+const btnVoice = $("btnVoice");
+const btnMute  = $("btnMute");                        // tolerated if absent
+const remoteAudio = $("remoteAudio") || new Audio();  // fallback sink if <audio> tag missing
+
+const PC_CONF = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+const voice = {
+  on: false, connecting: false, pc: null, stream: null,
+  makingOffer: false, polite: false,
+  pendingOffer: null, iceQueue: [], muted: false,
+};
+
+const signal = msg => socket.emit("voice_signal", msg);
+
+function setMuteLabel() {
+  if (!btnMute) return;
+  btnMute.textContent = voice.muted ? "MIC MUTED" : "MIC LIVE";
+  btnMute.dataset.muted = voice.muted;
+}
+function voiceUI(state) {
+  if (btnVoice) {
+    btnVoice.dataset.voice = state;
+    btnVoice.textContent =
+      state === "live" ? "VOICE: LIVE" :
+      state === "wait" ? "CONNECTING…" :
+      state === "ask"  ? "OPPONENT CALLING — ENABLE?" : "VOICE: OFF";
+  }
+  if (btnMute) btnMute.disabled = state !== "live";
+  if (state === "live") setMuteLabel();
+}
+
+function cleanupPC() {
+  if (voice.pc) {
+    const dead = voice.pc;
+    voice.pc = null;
+    dead.onconnectionstatechange = null;
+    dead.onnegotiationneeded = null;
+    dead.onicecandidate = null;
+    try { dead.close(); } catch (e) {}
+  }
+  if (voice.stream) { voice.stream.getTracks().forEach(t => t.stop()); voice.stream = null; }
+  remoteAudio.srcObject = null;
+}
+
+/* returns true on success, false on abort — always logs the exact reason */
+async function startVoice() {
+  if (voice.stream || voice.connecting) return false;
+  voice.connecting = true;
+  if (btnVoice) btnVoice.disabled = true;
+  voiceUI("wait");
+  try {
+    /* Preflight: the mic API only exists in secure contexts (HTTPS / localhost) */
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      addLog("Voice unavailable: mic API requires HTTPS or localhost — this page is not a secure context.", "info");
+      voiceUI("off");
+      return false;
+    }
+    cleanupPC();
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      });
+    } catch (err) {
+      addLog("Microphone blocked: " + err.name + ". Allow mic access and retry.", "info");
+      voiceUI("off");
+      return false;
+    }
+
+    voice.stream = stream;
+    voice.muted = false;
+
+    const pc = new RTCPeerConnection(PC_CONF);
+    voice.pc = pc;
+    stream.getAudioTracks().forEach(t => pc.addTrack(t, stream));
+
+    pc.ontrack = e => {
+      if (voice.pc !== pc) return;
+      remoteAudio.srcObject = e.streams[0];
+      remoteAudio.play().catch(() => {});
+    };
+    pc.onicecandidate = e => {
+      if (voice.pc === pc && e.candidate) signal({ t: "ice", c: e.candidate });
+    };
+    pc.onconnectionstatechange = () => {
+      if (voice.pc !== pc) return;
+      const s = pc.connectionState;
+      if (s === "connected") { voiceUI("live"); addLog("Voice channel established.", "info"); }
+      else if (s === "failed") { addLog("Voice connection failed (strict NAT — a TURN server may be needed).", "info"); stopVoice(false); }
+      else if (s === "closed") stopVoice(false);
+    };
+    pc.onnegotiationneeded = async () => {
+      if (voice.pc !== pc) return;
+      try {
+        voice.makingOffer = true;
+        await pc.setLocalDescription();
+        signal({ t: "desc", d: pc.localDescription });
+      } catch (e) { console.warn(e); }
+      finally { voice.makingOffer = false; }
+    };
+
+    voice.on = true;
+    return true;
+  } catch (err) {
+    /* anything landing here is a bug/missing piece, NOT a permission problem */
+    console.error("Voice init error:", err);
+    addLog("Voice init error: " + err.name + " — " + err.message, "info");
+    voiceUI("off");
+    return false;
+  } finally {
+    voice.connecting = false;
+    if (btnVoice) btnVoice.disabled = false;
+  }
+}
+
+function stopVoice(notify = true) {
+  if (notify && voice.on) signal({ t: "bye" });
+  cleanupPC();
+  voice.on = false; voice.makingOffer = false; voice.iceQueue = []; voice.muted = false;
+  voiceUI(voice.pendingOffer ? "ask" : "off");
+}
+
+async function handleVoiceSignal(msg) {
+  if (msg.t === "desc") {
+    if (!voice.on) {
+      if (msg.d.type === "offer") { voice.pendingOffer = msg.d; voiceUI("ask"); }
+      return;
+    }
+    const collision = msg.d.type === "offer" && (voice.makingOffer || voice.pc.signalingState !== "stable");
+    if (collision && !voice.polite) return;
+    await voice.pc.setRemoteDescription(msg.d).catch(() => {});
+    for (const c of voice.iceQueue) voice.pc.addIceCandidate(c).catch(() => {});
+    voice.iceQueue = [];
+    if (msg.d.type === "offer") {
+      await voice.pc.setLocalDescription();
+      signal({ t: "desc", d: voice.pc.localDescription });
+    }
+  }
+  else if (msg.t === "ice") {
+    if (!voice.on || !voice.pc || !voice.pc.remoteDescription) { voice.iceQueue.push(msg.c); return; }
+    voice.pc.addIceCandidate(msg.c).catch(() => {});
+  }
+  else if (msg.t === "bye") {
+    if (voice.on || voice.pc) { stopVoice(false); addLog("Opponent ended voice chat.", "info"); }
+  }
+}
+
+if (btnVoice) btnVoice.addEventListener("click", async () => {
+  if (voice.connecting) return;
+  if (!voice.on) {
+    const pending = voice.pendingOffer;
+    voice.pendingOffer = null;
+    const ok = await startVoice();
+    if (!ok) return;
+    addLog("Voice chat enabled.", "info");
+    if (pending) await handleVoiceSignal({ t: "desc", d: pending });
+  } else {
+    addLog("Voice chat disabled.", "info");
+    stopVoice(true);
+  }
+});
+
+if (btnMute) btnMute.addEventListener("click", () => {
+  if (!voice.stream) return;
+  voice.muted = !voice.muted;
+  voice.stream.getAudioTracks().forEach(t => t.enabled = !voice.muted);
+  setMuteLabel();
+});
+
+socket.on("voice_signal", handleVoiceSignal);
+socket.on("state", v => { voice.polite = (v.you_are === "p2"); });
+socket.on("opponent_left", () => stopVoice(false));
+window.addEventListener("beforeunload", () => { if (voice.on) signal({ t: "bye" }); });
+
+/* ══════════ CHAT ROOM — room-scoped text comms ══════════ */
+const chatEl = $("chat"), chatForm = $("chatForm"), chatInput = $("chatInput");
+let myPid = null;
+
+/* escape everything — usernames and message text are untrusted */
+const esc = s => String(s).replace(/[&<>"']/g, c => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+}[c]));
+
+function addChat(msg) {
+  const li = document.createElement("li");
+  if (msg.sys) {
+    li.className = "chat__line chat--sys";
+    li.textContent = msg.text;
+  } else {
+    const mine = (msg.pid === myPid);
+    const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    li.className = "chat__line" + (mine ? " chat--me" : "");
+    li.innerHTML =
+      '<span class="chat__who">' + esc(mine ? "YOU" : msg.username) + " · " + time + "</span>" +
+      esc(msg.text);
+  }
+  chatEl.appendChild(li);
+  while (chatEl.children.length > 80) chatEl.firstElementChild.remove();
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+chatForm.addEventListener("submit", e => {
+  e.preventDefault();                       /* Enter key sends, no page reload */
+  const text = chatInput.value.trim();
+  if (!text) return;
+  socket.emit("chat_message", { text: text });
+  chatInput.value = "";
+  chatInput.focus();
+});
+
+socket.on("chat_message", addChat);
+socket.on("state", v => { myPid = v.you_are; });
+})();
+</script>
+</body>
+</html>

@@ -18,201 +18,96 @@
   <div class="ocean__vignette"></div>
 </div>
 
-<header class="cmdbar">
-  <div class="cmdbar__ident">
-    <span class="cmdbar__anchor" aria-hidden="true">⚓</span>
-    <div>
-      <h1 class="cmdbar__title">BATTLE<span>SHIP</span></h1>
-      <p class="cmdbar__sub">TACTICAL COMMAND // ONLINE MATCH</p>
+<main class="lobby">
+  <div class="lobby__hero">
+    <div class="ship-container">
+      <svg class="battleship" viewBox="0 0 200 80" xmlns="http://www.w3.org/2000/svg">
+        <path d="M20,50 L40,35 L160,35 L180,50 L170,65 L30,65 Z" fill="#2a4a5f" stroke="#4fe3c1" stroke-width="2"/>
+        <rect x="50" y="30" width="100" height="8" fill="#1a3a4f" stroke="#4fe3c1" stroke-width="1"/>
+        <rect x="75" y="18" width="50" height="15" fill="#1a3a4f" stroke="#4fe3c1" stroke-width="1.5"/>
+        <line x1="100" y1="18" x2="100" y2="8" stroke="#4fe3c1" stroke-width="1.5"/>
+        <circle cx="100" cy="6" r="2" fill="#4fe3c1"/>
+        <circle cx="85" cy="24" r="2" fill="#4fe3c1"/>
+        <circle cx="100" cy="24" r="2" fill="#4fe3c1"/>
+        <circle cx="115" cy="24" r="2" fill="#4fe3c1"/>
+        <rect x="55" y="32" width="8" height="3" fill="#4fe3c1"/>
+        <rect x="137" y="32" width="8" height="3" fill="#4fe3c1"/>
+      </svg>
+      <div class="ship-waves">
+        <svg class="wave wave--1" viewBox="0 0 1200 120" preserveAspectRatio="none"><path d="M0,60 C150,90 350,30 600,60 C850,90 1050,30 1200,60 L1200,120 L0,120 Z" fill="rgba(79,227,193,0.15)"/></svg>
+        <svg class="wave wave--2" viewBox="0 0 1200 120" preserveAspectRatio="none"><path d="M0,80 C200,50 400,100 600,80 C800,60 1000,100 1200,80 L1200,120 L0,120 Z" fill="rgba(79,227,193,0.1)"/></svg>
+      </div>
     </div>
+    <h1 class="lobby__title">BATTLE<span>SHIP</span></h1>
+    <p class="lobby__subtitle">TACTICAL COMMAND // SECTOR 7-G</p>
   </div>
-</header>
 
-<div class="turnbar" id="turnbar" data-state="enemy">
-  <span id="turnText" aria-live="polite">PRESS FIND GAME TO BEGIN</span>
-</div>
-
-<main class="deck">
-
-  <section class="console panel-you">
-    <header class="console__head">
-      <h2 class="console__name">Your Fleet</h2>
-    </header>
-    <div class="board-frame">
-      <div class="board" id="boardYou"></div>
+  <div class="lobby__controls" id="lobbyControls">
+    <div class="lobby__input-group">
+      <label for="username" class="lobby__label">CALLSIGN</label>
+      <input type="text" id="username" class="lobby__input" placeholder="Enter your name" maxlength="20" value="Commander">
     </div>
-  </section>
+    <button id="joinBtn" class="btn btn--primary btn--large">
+      <span class="btn__text">JOIN QUEUE</span>
+    </button>
+  </div>
 
-  <aside class="ops">
-    <section class="console ops__log">
-      <header class="console__head">
-        <h2 class="console__name">Combat Log</h2>
-        <span class="console__tag console__tag--live">LIVE FEED</span>
-      </header>
-      <ol class="log" id="log" aria-live="polite">
-        <li class="log__cursor" id="logCursor">▮</li>
-      </ol>
-    </section>
-    <div class="ops__controls">
-      <button class="btn btn--primary" id="btnFind" type="button">Find Game</button>
-      <button class="btn" id="btnPlace" type="button" disabled>Randomize Ships</button>
+  <div class="lobby__waiting" id="waitingState" hidden>
+    <div class="waiting__indicator">
+      <span class="waiting__dot"></span>
+      <span class="waiting__dot"></span>
+      <span class="waiting__dot"></span>
     </div>
-    <p class="ops__hint">Find a game, randomize your ships, then click a square in <b>ENEMY WATERS</b> to fire.</p>
-  </aside>
-
-  <section class="console console--enemy" id="panelEnemy">
-    <header class="console__head">
-      <h2 class="console__name">Enemy Waters</h2>
-    </header>
-    <div class="board-frame">
-      <div class="board board--enemy board--locked" id="boardEnemy"></div>
-    </div>
-  </section>
-
+    <p class="waiting__text">SEARCHING FOR OPPONENT...</p>
+    <button id="cancelBtn" class="btn">CANCEL</button>
+  </div>
 </main>
 
-<div class="endgame" id="endgame" hidden>
-  <div class="endgame__card">
-    <h2 class="endgame__stamp" id="endTitle">VICTORY</h2>
-    <p class="endgame__detail" id="endDetail"></p>
-    <button class="btn btn--primary" id="btnAgain" type="button">Play Again</button>
-  </div>
+<div class="notification" id="notification" hidden>
+  <span class="notification__text" id="notificationText"></span>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
 <script>
 (() => {
-"use strict";
+  const socket = io();
+  const joinBtn = document.getElementById('joinBtn');
+  const cancelBtn = document.getElementById('cancelBtn');
+  const usernameInput = document.getElementById('username');
+  const lobbyControls = document.getElementById('lobbyControls');
+  const waitingState = document.getElementById('waitingState');
+  const notification = document.getElementById('notification');
+  const notificationText = document.getElementById('notificationText');
 
-/* Connect to the Flask-SocketIO server that served this page. */
-const socket = io();
-
-const SIZE = 10;
-const WATER = "~", SHIP = "S", HIT = "X", MISS = "O";
-const ROWS = "ABCDEFGHIJ".split("");
-const $ = id => document.getElementById(id);
-
-const boardYouEl = $("boardYou"), boardEnemyEl = $("boardEnemy");
-const logEl = $("log"), cursorLi = $("logCursor");
-const turnbarEl = $("turnbar"), turnTextEl = $("turnText");
-const endgameEl = $("endgame");
-const btnFind = $("btnFind"), btnPlace = $("btnPlace");
-
-let last = null;   /* the most recent "state" message from the server */
-
-/* ── board DOM ── */
-function buildBoard(container, clickable) {
-  container.innerHTML = "";
-  const corner = document.createElement("div");
-  corner.className = "coord";
-  container.appendChild(corner);
-  for (let c = 0; c < SIZE; c++) {
-    const d = document.createElement("div");
-    d.className = "coord"; d.textContent = c + 1;
-    container.appendChild(d);
+  function showNotification(text, duration = 3000) {
+    notificationText.textContent = text;
+    notification.hidden = false;
+    notification.classList.add('notification--show');
+    setTimeout(() => {
+      notification.classList.remove('notification--show');
+      setTimeout(() => notification.hidden = true, 500);
+    }, duration);
   }
-  const grid = [];
-  for (let r = 0; r < SIZE; r++) {
-    const lbl = document.createElement("div");
-    lbl.className = "coord"; lbl.textContent = ROWS[r];
-    container.appendChild(lbl);
-    grid[r] = [];
-    for (let c = 0; c < SIZE; c++) {
-      const el = document.createElement(clickable ? "button" : "div");
-      if (clickable) {
-        el.type = "button";
-        el.addEventListener("click", () => socket.emit("fire", { r: r, c: c }));
-      }
-      el.className = "cell";
-      el.setAttribute("aria-label", "Grid " + ROWS[r] + "-" + (c + 1));
-      grid[r][c] = el;
-      container.appendChild(el);
-    }
-  }
-  return grid;
-}
 
-const cellsYou = buildBoard(boardYouEl, false);
-const cellsEnemy = buildBoard(boardEnemyEl, true);
+  joinBtn.addEventListener('click', () => {
+    const username = usernameInput.value.trim() || 'Commander';
+    socket.emit('join_queue', { username });
+    lobbyControls.hidden = true;
+    waitingState.hidden = false;
+  });
 
-function paint(grid, board) {
-  for (let r = 0; r < SIZE; r++) for (let c = 0; c < SIZE; c++) {
-    const v = board[r][c];
-    let cls = "cell";
-    if (v === SHIP) cls += " cell--ship";
-    else if (v === HIT) cls += " cell--hit";
-    else if (v === MISS) cls += " cell--miss";
-    grid[r][c].className = cls;
-  }
-}
+  cancelBtn.addEventListener('click', () => {
+    socket.emit('leave_queue');
+    waitingState.hidden = true;
+    lobbyControls.hidden = false;
+  });
 
-/* ── what should the turn bar say? ── */
-function statusOf(v) {
-  if (v.over) {
-    return v.winner === v.you_are
-      ? ["win", "VICTORY — ENEMY FLEET DESTROYED"]
-      : ["lose", "DEFEAT — YOUR FLEET IS LOST"];
-  }
-  if (!v.opponent_here)  return ["enemy", "WAITING FOR AN OPPONENT…"];
-  if (!v.you_ready)      return ["enemy", "PLACE YOUR SHIPS"];
-  if (!v.opponent_ready) return ["enemy", "WAITING FOR OPPONENT TO PLACE SHIPS…"];
-  return v.your_turn ? ["you", "YOUR TURN — FIRE AT WILL"]
-                     : ["enemy", "OPPONENT IS TAKING AIM…"];
-}
-
-function render(v) {
-  paint(cellsYou, v.your_board);
-  paint(cellsEnemy, v.enemy_board);
-
-  const [state, text] = statusOf(v);
-  turnbarEl.dataset.state = state;
-  turnTextEl.textContent = text;
-
-  const canFire = state === "you";
-  boardEnemyEl.classList.toggle("board--locked", !canFire);
-  btnPlace.disabled = !(v.opponent_here && !v.you_ready);
-
-  if (v.over) {
-    const win = v.winner === v.you_are;
-    endgameEl.classList.toggle("endgame--win", win);
-    endgameEl.classList.toggle("endgame--lose", !win);
-    $("endTitle").textContent = win ? "VICTORY" : "DEFEAT";
-    $("endDetail").textContent = text;
-    endgameEl.hidden = false;
-  }
-}
-
-/* ── combat log ── */
-function addLog(html, kind) {
-  const li = document.createElement("li");
-  li.className = "log__line log--" + kind;
-  li.innerHTML = html;
-  logEl.insertBefore(li, cursorLi);
-  while (logEl.children.length > 60) logEl.firstElementChild.remove();
-  logEl.scrollTop = logEl.scrollHeight;
-}
-
-/* ── messages from the server ── */
-socket.on("state", v => { last = v; render(v); });
-
-socket.on("shot_result", res => {
-  /* The shooter is whoever had the turn before this shot. */
-  const who = last && last.your_turn ? "YOU" : "ENEMY";
-  if (res.result === "miss") addLog(who + " FIRE — splash only.", "miss");
-  else if (res.result === "hit") addLog(who + " FIRE — <b>DIRECT HIT</b> on " + res.ship.toUpperCase() + ".", "hit");
-  else if (res.result === "sunk") addLog(who + " FIRE — " + res.ship.toUpperCase() + " <b>DESTROYED</b>.", "sunk");
-});
-
-socket.on("error_msg", res => addLog(res.error, "info"));
-
-/* ── buttons ── */
-btnFind.addEventListener("click", () => {
-  socket.emit("join_game");
-  btnFind.disabled = true;      /* one join per page load */
-  addLog("Searching for a game…", "info");
-});
-btnPlace.addEventListener("click", () => socket.emit("place_ships"));
-$("btnAgain").addEventListener("click", () => location.reload());
+  socket.on('match_found', (data) => {
+    showNotification('MATCH FOUND! DEPLOYING...');
+    setTimeout(() => {
+      window.location.href = `/game?token=${data.token}`;
+    }, 1500);
+  });
 })();
 </script>
 </body>
