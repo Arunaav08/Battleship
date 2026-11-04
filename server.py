@@ -10,7 +10,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 games = {}          # room_id -> Game instance
 room_to_sids = {}   # room_id -> {'p1': sid, 'p2': sid}
-room_meta = {}      # room_id -> {'p1': username, 'p2': username}
+room_meta = {}      # room_id -> {'p1': username, 'p2': username} username typed by the users
 waiting_queue = []  # [{'sid':..., 'username':...}]
 tokens = {}         # token -> {'room':..., 'player_id':..., 'username':...}
 

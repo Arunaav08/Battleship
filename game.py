@@ -101,7 +101,7 @@ class Game:
 
     def add_player(self, player_id):
         # player_id is something the server gives you (e.g. a socket id)
-        # Only allow up to 2 players.
+        # Only allow up to 2 players And player_id should be unique. If player_id already exists, return False.
         if len(self.players) >= 2 or player_id in self.players:
             return False
         self.players[player_id] = {
@@ -132,7 +132,7 @@ class Game:
 
 
     def fire(self, player_id, row, col):
-        # --- Guards: reject anything illegal ---
+        # all error cases, game over, not a player, not all players ready, not your turn
         if self.over:                       
             return {"error": "game over"}
         if player_id not in self.players:   
